@@ -30,47 +30,59 @@ class M1(StatesGroup):
     stop_second_pendulum = State()
 
 
+start_kb = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True).add('СТАРТ')
+stop_kb = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True).add('СТОП')
+
+
 @dp.message_handler(commands=['m1'])
 async def m1(message: types.Message):
-    await message.answer('Сделайте 3 измерения')
+    await message.answer('Сделайте 3 измерения', reply_markup=start_kb)
     await M1.start_first_pendulum.set()
 
 
-@dp.message_handler(state=M1.start_first_pendulum, commands=['start'])
+def msg_text(text):
+    def eq(msg):
+        return msg.text == text
+    return eq
+
+
+@dp.message_handler(msg_text('СТАРТ'), state=M1.start_first_pendulum)
 async def start_first_pendulum(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['start'] = time.time_ns()
+    await message.answer('Секундомер запущен!', reply_markup=stop_kb)
     await M1.stop_first_pendulum.set()
 
 
-@dp.message_handler(state=M1.stop_first_pendulum, commands=['stop'])
+@dp.message_handler(msg_text('СТОП'), state=M1.stop_first_pendulum)
 async def stop_first_pendulum(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data.setdefault('first', [])
         delta_ms = ns2ms(time.time_ns() - data['start'])
         data['first'].append(delta_ms)
-        await message.answer(f'{len(data["first"])}-ое измерение: {data["first"][-1]}')
+        await message.answer(f'{len(data["first"])}-ое измерение: {data["first"][-1]}', reply_markup=start_kb)
         if len(data['first']) == 3:
-            await message.answer('Сделайте одно измерение')
+            await message.answer('Сделайте одно измерение', reply_markup=start_kb)
             await M1.start_second_pendulum.set()
         else:
             await M1.start_first_pendulum.set()
 
 
-@dp.message_handler(state=M1.start_second_pendulum, commands=['start'])
+@dp.message_handler(msg_text('СТАРТ'), state=M1.start_second_pendulum)
 async def start_second_pendulum(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['start'] = time.time_ns()
+    await message.answer('Секундомер запущен!', reply_markup=stop_kb)
     await M1.stop_second_pendulum.set()
 
 
-@dp.message_handler(state=M1.stop_second_pendulum, commands=['stop'])
+@dp.message_handler(msg_text('СТОП'), state=M1.stop_second_pendulum)
 async def stop_second_pendulum(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data.setdefault('second', [])
         delta_ms = ns2ms(time.time_ns() - data['start'])
         data['second'].append(delta_ms)
-        await message.answer(f'{len(data["second"])}-ое измерение: {data["second"][-1]}')
+        await message.answer(f'{len(data["second"])}-ое измерение: {data["second"][-1]}', reply_markup=start_kb)
         if len(data['second']) == 1:
             await bot.send_message(
                 message.chat.id,
@@ -80,6 +92,7 @@ async def stop_second_pendulum(message: types.Message, state: FSMContext):
                     sep='\n',
                 ),
             )
+            data.clear()
             await state.finish()
         else:
             await M1.start_second_pendulum.set()
@@ -87,7 +100,6 @@ async def stop_second_pendulum(message: types.Message, state: FSMContext):
 
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
-
 
 # @dp.message_handler(state=M1.pendulum2)
 # async def process_name(message: types.Message, state: FSMContext):
