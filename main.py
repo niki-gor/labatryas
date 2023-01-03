@@ -1,21 +1,28 @@
+import asyncio
 import logging
 import time
+from abc import abstractmethod
+from dataclasses import asdict, dataclass
+from typing import Optional
 
 import aiogram.utils.markdown as md
+import attr
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.utils import executor
-from dotenv import dotenv_values
+
+from config_reader import config
+from laba_manager import LabaManager
 
 logging.basicConfig(level=logging.INFO)
 
-config = dotenv_values()
 
-bot = Bot(token=config["API_TOKEN"])
+bot = Bot(token=config.bot_token.get_secret_value())
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
+lm = LabaManager()
 
 
 def ns2ms(ns: int):
@@ -33,10 +40,130 @@ start_kb = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True).add('
 stop_kb = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True).add('СТОП')
 
 
+# class Session:
+#     def __init__(self):
+#         self.laba = None
+    
+#     async def handle_message(self, message: types.Message):
+#         response = Response()
+#         if self.laba is None:
+#             laba = lm.find(message.text)
+#             if laba is None:
+#                 response.text = 'Лаба не найдена'
+#             else:
+#                 self.laba = laba
+#                 response = await self.laba.get()
+#         else:
+#             await self.laba.put(message.text)
+#             response = await self.laba.get()
+#             if self.laba.done():
+#                 self.laba = None
+#         await message.answer(**asdict(response))
+        
+
+# async def m1(inchan: asyncio.Queue, outchan: asyncio.Queue):
+#     data = {}
+#     N1 = 3
+#     await outchan.put(Response(f'Сделайте {N1} измерения'))
+
+
+# @dp.message_handler()
+# async def answer(message: types.Message, state: FSMContext):
+#     response = Response()
+#     async with state.proxy() as data:
+#         lab = data.get('lab')
+#         if lab is None:
+#             lab_name = message.text
+#             if lab_name not in laba_set:
+#                 response.text = 'Net takoy laby'
+#             else:
+#                 data['lab'] = lab_name
+#                 response.text = 'Created new laba'
+#         else:
+#             response.text = 'Processing laba...'
+#     await message.answer(**asdict(response))
+
+
+class Work(StatesGroup):
+    choose = State()
+    do = State()
+
+
+@dp.message_handler(commands=['start'])
+async def greet(message: types.Message, state: FSMContext):
+    await message.answer('Выберите лабу')
+    await state.set_state(Work.choose)
+
+l = None
+@dp.message_handler(state=Work.choose)
+async def choose(message: types.Message, state: FSMContext):
+    laba = lm.find(message.text)
+    if laba is None:
+        await message.answer('Нет такой лабы')
+        return
+    await state.set_state(Work.do)
+    # await state.update_data(laba=laba)
+    global l
+    l = laba
+    intro = await laba.get()
+    await message.answer(**intro)
+
+
+@dp.message_handler(state=Work.do)
+async def do(message: types.Message, state: FSMContext):
+    # data = await state.get_data()
+    global l
+    laba = l
+    await laba.put(message.text)
+    response = await laba.get()
+    await message.answer(**response)
+    if laba.done():
+        await message.answer('Выберите новую лабу')
+        await state.set_state(Work.choose)
+            
+
 @dp.message_handler(commands=['m1'])
-async def m1(message: types.Message):
+async def m1(message: types.Message, state: FSMContext):
     await message.answer('Сделайте 3 измерения', reply_markup=start_kb)
     await M1.start_first_pendulum.set()
+
+
+async def async_task(inchan: asyncio.Queue, outchan: asyncio.Queue):
+    x = await inchan.get()
+    await outchan.put(x)
+
+# @dp.message_handler(commands=['async'])
+# async def async_cmd(message: types.Message, state: FSMContext):
+#     data = await state.get_data()
+#     if 'session' not in data:
+#         logging.info('HOOOOW')
+#     data.setdefault('session', Session())
+#     await data['session'].handle_message(message)
+        
+        # if 'laba' not in data:
+        #     laba = data['laba']
+        #     await laba.put(message.text)
+        #     response = await laba.get()
+        #     if response.text:
+        #         await message.answer(**asdict(response))
+        # else:
+        # data['laba'] = MMM1()
+        # laba = data['laba']
+        # text = await laba.get()
+        # await message.answer(text)
+        # if laba.done():
+        #     del data['laba']
+
+
+    # inchan = asyncio.Queue()
+    # outchan = asyncio.Queue()
+    # loop = asyncio.get_event_loop()
+    # loop.create_task(async_task(inchan, outchan))
+
+    # await inchan.put(message.text)
+    # result = await outchan.get()
+
+    # await message.answer(f'You wrote: {result}')
 
 
 def msg_text(text):
@@ -98,7 +225,7 @@ async def stop_second_pendulum(message: types.Message, state: FSMContext):
 
 
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=False)
 
 # @dp.message_handler(state=M1.pendulum2)
 # async def process_name(message: types.Message, state: FSMContext):
